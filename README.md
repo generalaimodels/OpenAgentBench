@@ -25,6 +25,7 @@ Research-grade benchmark and verification platform for LLM agents, RAG systems, 
 - [Execution Model](#execution-model)
 - [Retrieval and Evidence Model](#retrieval-and-evidence-model)
 - [Memory Model](#memory-model)
+- [Testing](#testing)
 - [Tool Governance Model](#tool-governance-model)
 - [Repository Layout](#repository-layout)
 - [BenchSpec Contract](#benchspec-contract)
@@ -176,3 +177,77 @@ flowchart TD
     TRACE --> OBS[Logs / Metrics / Traces]
     SCORE --> ART[Reports / Replays / Visualizations]
     OBS --> ART
+```
+
+---
+
+## Memory Model
+
+The agent memory subsystem now lives in [`agent_data/`](/mnt/c/Users/heman/Desktop/code/Agentic_frame_work/OpenAgentBench/agent_data/README.md).
+
+It is organized around three logical data planes:
+
+- sessions
+- tiered memory
+- append-dominant conversation history
+
+The implementation includes:
+
+- PostgreSQL DDL with hash partitioning and monthly history sub-partitions
+- OpenAI-compatible context compilation logic
+- multimodal message-part storage plus raw API-call and stream-event capture
+- MCP / JSON-RPC / tool-call protocol ledgers for replayable agent-tool evaluation
+- fast JSON serialization helpers for JSONB-heavy write paths
+- SQL query templates for session, memory, and history hot paths
+- OpenAPI contracts for storage and context endpoints
+
+See [`agent_data/README.md`](/mnt/c/Users/heman/Desktop/code/Agentic_frame_work/OpenAgentBench/agent_data/README.md) for the module index and [`agent_data/plan.md`](/mnt/c/Users/heman/Desktop/code/Agentic_frame_work/OpenAgentBench/agent_data/plan.md) for the full architectural rationale.
+
+---
+
+## Testing
+
+The `agent_data` test surface is documented in [`tests/README.md`](/mnt/c/Users/heman/Desktop/code/Agentic_frame_work/OpenAgentBench/tests/README.md).
+
+Repository-owned tests live under [`tests/`](/mnt/c/Users/heman/Desktop/code/Agentic_frame_work/OpenAgentBench/tests/README.md). Package directories do not carry `test_*.py` modules.
+
+Current coverage includes:
+
+- fast unit checks in [`tests/test_agent_data.py`](/mnt/c/Users/heman/Desktop/code/Agentic_frame_work/OpenAgentBench/tests/test_agent_data.py)
+- retrieval checks in [`tests/test_agent_retrieval.py`](/mnt/c/Users/heman/Desktop/code/Agentic_frame_work/OpenAgentBench/tests/test_agent_retrieval.py) and [`tests/test_agent_retrieval_compat.py`](/mnt/c/Users/heman/Desktop/code/Agentic_frame_work/OpenAgentBench/tests/test_agent_retrieval_compat.py)
+- realtime dry verification in [`tests/realtime/test_realtime_dry.py`](/mnt/c/Users/heman/Desktop/code/Agentic_frame_work/OpenAgentBench/tests/realtime/test_realtime_dry.py)
+- PostgreSQL read/write/retrieval/selection validation when `TEST_DATABASE_URL` is configured
+
+The realtime-specific notes live in [`tests/realtime/README.md`](/mnt/c/Users/heman/Desktop/code/Agentic_frame_work/OpenAgentBench/tests/realtime/README.md).
+
+---
+
+## Repository Layout
+
+```text
+OpenAgentBench/
+├── agent_data/
+│   ├── README.md
+│   ├── plan.md
+│   ├── api/
+│   │   ├── README.md
+│   │   ├── openai_python_endpoints.md
+│   │   └── openapi.yaml
+│   ├── sql/
+│   │   ├── README.md
+│   │   └── 001_agent_data_schema.sql
+│   ├── __init__.py
+│   └── runtime.py
+├── openagentbench/
+│   └── agent_data/
+│       ├── compiler.py
+│       ├── queries.py
+│       ├── scoring.py
+│       └── ...
+└── tests/
+    ├── README.md
+    ├── test_agent_data.py
+    └── realtime/
+        ├── README.md
+        └── test_realtime_dry.py
+```

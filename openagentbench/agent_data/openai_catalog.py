@@ -19,6 +19,16 @@ class OpenAIEndpointSpec:
 
 OPENAI_ENDPOINTS: tuple[OpenAIEndpointSpec, ...] = (
     OpenAIEndpointSpec(
+        name="completions",
+        path="/v1/completions",
+        python_sdk_call="client.completions.create(...)",
+        input_modalities=("text",),
+        output_modalities=("text", "structured_data"),
+        supports_mixed_content=False,
+        notes="Legacy text completion surface that remains relevant for compatibility checks and migration audits.",
+        source_url="https://platform.openai.com/docs/api-reference/completions",
+    ),
+    OpenAIEndpointSpec(
         name="responses",
         path="/v1/responses",
         python_sdk_call="client.responses.create(...)",
@@ -117,6 +127,16 @@ OPENAI_ENDPOINTS: tuple[OpenAIEndpointSpec, ...] = (
         supports_mixed_content=False,
         notes="Text embeddings endpoint for retrieval and ranking.",
         source_url="https://developers.openai.com/api/docs/models/text-embedding-3-small",
+    ),
+    OpenAIEndpointSpec(
+        name="moderations",
+        path="/v1/moderations",
+        python_sdk_call="client.moderations.create(...)",
+        input_modalities=("text", "image", "mixed"),
+        output_modalities=("structured_data", "safety_labels"),
+        supports_mixed_content=True,
+        notes="Safety classification endpoint for text and image policy checks.",
+        source_url="https://platform.openai.com/docs/api-reference/moderations",
     ),
 )
 

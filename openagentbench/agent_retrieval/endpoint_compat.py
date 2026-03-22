@@ -62,6 +62,21 @@ def build_openai_chat_completions_request(
     }
 
 
+def build_openai_completions_request(
+    *,
+    model: str,
+    prompt: str,
+    max_tokens: int = 256,
+    temperature: float = 0.0,
+) -> dict[str, Any]:
+    return {
+        "model": model,
+        "prompt": prompt,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
+
+
 def build_openai_embeddings_request(
     *,
     model: str,
@@ -72,6 +87,22 @@ def build_openai_embeddings_request(
     if dimensions is not None:
         payload["dimensions"] = dimensions
     return payload
+
+
+def build_openai_moderations_request(
+    *,
+    model: str,
+    inputs: Sequence[str] | str,
+) -> dict[str, Any]:
+    payload_input: str | list[str]
+    if isinstance(inputs, str):
+        payload_input = inputs
+    else:
+        payload_input = list(inputs)
+    return {
+        "model": model,
+        "input": payload_input,
+    }
 
 
 def build_openai_realtime_session_request(
@@ -180,6 +211,129 @@ def build_openai_video_generation_request(
     return payload
 
 
+def build_vllm_responses_request(
+    *,
+    model: str,
+    system_prompt: str,
+    user_input: str,
+    context: Sequence[str] = (),
+    max_output_tokens: int = 256,
+    temperature: float = 0.0,
+    reasoning_effort: str | None = None,
+) -> dict[str, Any]:
+    return build_openai_responses_request(
+        model=model,
+        system_prompt=system_prompt,
+        user_input=user_input,
+        context=context,
+        max_output_tokens=max_output_tokens,
+        temperature=temperature,
+        reasoning_effort=reasoning_effort,
+    )
+
+
+def build_vllm_chat_completions_request(
+    *,
+    model: str,
+    system_prompt: str,
+    user_input: str,
+    context: Sequence[str] = (),
+    max_tokens: int = 256,
+    temperature: float = 0.0,
+) -> dict[str, Any]:
+    return build_openai_chat_completions_request(
+        model=model,
+        system_prompt=system_prompt,
+        user_input=user_input,
+        context=context,
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
+
+
+def build_vllm_completions_request(
+    *,
+    model: str,
+    prompt: str,
+    max_tokens: int = 256,
+    temperature: float = 0.0,
+) -> dict[str, Any]:
+    return build_openai_completions_request(
+        model=model,
+        prompt=prompt,
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
+
+
+def build_vllm_embeddings_request(
+    *,
+    model: str,
+    inputs: Sequence[str],
+    dimensions: int | None = None,
+) -> dict[str, Any]:
+    return build_openai_embeddings_request(model=model, inputs=inputs, dimensions=dimensions)
+
+
+def build_vllm_audio_transcription_request(
+    *,
+    model: str,
+    file_name: str,
+    response_format: str = "json",
+) -> dict[str, Any]:
+    return build_openai_audio_transcription_request(
+        model=model,
+        file_name=file_name,
+        response_format=response_format,
+    )
+
+
+def build_vllm_audio_translation_request(
+    *,
+    model: str,
+    file_name: str,
+    response_format: str = "json",
+) -> dict[str, Any]:
+    return build_openai_audio_translation_request(
+        model=model,
+        file_name=file_name,
+        response_format=response_format,
+    )
+
+
+def build_vllm_realtime_session_request(
+    *,
+    model: str,
+    modalities: Sequence[str] = ("audio",),
+    instructions: str | None = None,
+) -> dict[str, Any]:
+    return build_openai_realtime_session_request(
+        model=model,
+        modalities=modalities,
+        instructions=instructions,
+    )
+
+
+def build_vllm_score_request(
+    *,
+    model: str,
+    text_1: str,
+    text_2: str | Sequence[str],
+    normalize: bool = True,
+) -> dict[str, Any]:
+    payload_text_2: str | list[str]
+    if isinstance(text_2, str):
+        payload_text_2 = text_2
+    else:
+        payload_text_2 = list(text_2)
+    return {
+        "model": model,
+        "text_1": text_1,
+        "text_2": payload_text_2,
+        "normalize": normalize,
+    }
+
+
 def build_gemini_generate_content_request(
     *,
     system_instruction: str,
@@ -237,7 +391,9 @@ def extract_gemini_text(response_payload: dict[str, Any]) -> str:
 class EndpointCompatibilityReport:
     openai_responses_request: dict[str, Any]
     openai_chat_request: dict[str, Any]
+    openai_completions_request: dict[str, Any]
     openai_embeddings_request: dict[str, Any]
+    openai_moderations_request: dict[str, Any]
     openai_realtime_request: dict[str, Any]
     openai_audio_speech_request: dict[str, Any]
     openai_audio_transcription_request: dict[str, Any]
@@ -245,6 +401,14 @@ class EndpointCompatibilityReport:
     openai_image_generation_request: dict[str, Any]
     openai_image_edit_request: dict[str, Any]
     openai_video_generation_request: dict[str, Any]
+    vllm_responses_request: dict[str, Any]
+    vllm_chat_request: dict[str, Any]
+    vllm_completions_request: dict[str, Any]
+    vllm_embeddings_request: dict[str, Any]
+    vllm_audio_transcription_request: dict[str, Any]
+    vllm_audio_translation_request: dict[str, Any]
+    vllm_realtime_request: dict[str, Any]
+    vllm_score_request: dict[str, Any]
     gemini_generate_content_request: dict[str, Any]
     gemini_count_tokens_request: dict[str, Any]
 
@@ -267,10 +431,19 @@ def build_endpoint_compatibility_report() -> EndpointCompatibilityReport:
             user_input=user_input,
             context=context,
         ),
+        openai_completions_request=build_openai_completions_request(
+            model="gpt-3.5-turbo-instruct",
+            prompt=user_input,
+            max_tokens=64,
+        ),
         openai_embeddings_request=build_openai_embeddings_request(
             model="text-embedding-3-small",
             inputs=("endpoint compatibility", "retrieval memory"),
             dimensions=256,
+        ),
+        openai_moderations_request=build_openai_moderations_request(
+            model="omni-moderation-latest",
+            inputs=(user_input,),
         ),
         openai_realtime_request=build_openai_realtime_session_request(
             model="gpt-realtime-mini",
@@ -304,6 +477,46 @@ def build_endpoint_compatibility_report() -> EndpointCompatibilityReport:
             prompt=user_input,
             image_name="sample.png",
         ),
+        vllm_responses_request=build_vllm_responses_request(
+            model="meta-llama/Meta-Llama-3.1-8B-Instruct",
+            system_prompt=system_prompt,
+            user_input=user_input,
+            context=context,
+            reasoning_effort="medium",
+        ),
+        vllm_chat_request=build_vllm_chat_completions_request(
+            model="meta-llama/Meta-Llama-3.1-8B-Instruct",
+            system_prompt=system_prompt,
+            user_input=user_input,
+            context=context,
+        ),
+        vllm_completions_request=build_vllm_completions_request(
+            model="meta-llama/Meta-Llama-3.1-8B-Instruct",
+            prompt=user_input,
+            max_tokens=64,
+        ),
+        vllm_embeddings_request=build_vllm_embeddings_request(
+            model="intfloat/e5-small-v2",
+            inputs=("endpoint compatibility", "retrieval memory"),
+        ),
+        vllm_audio_transcription_request=build_vllm_audio_transcription_request(
+            model="openai/whisper-small",
+            file_name="sample.wav",
+        ),
+        vllm_audio_translation_request=build_vllm_audio_translation_request(
+            model="openai/whisper-small",
+            file_name="sample.wav",
+        ),
+        vllm_realtime_request=build_vllm_realtime_session_request(
+            model="openai/whisper-small",
+            modalities=("audio",),
+            instructions=system_prompt,
+        ),
+        vllm_score_request=build_vllm_score_request(
+            model="BAAI/bge-reranker-base",
+            text_1="postgres retrieval",
+            text_2=("postgres retrieval memory", "image OCR reranking"),
+        ),
         gemini_generate_content_request=build_gemini_generate_content_request(
             system_instruction=system_prompt,
             user_text=user_input,
@@ -323,8 +536,12 @@ def assert_endpoint_payload_compatibility(report: EndpointCompatibilityReport | 
         raise AssertionError("OpenAI Responses payload must contain system and user items")
     if current.openai_chat_request["messages"][0]["role"] != "system":
         raise AssertionError("OpenAI Chat payload must start with a system message")
+    if "prompt" not in current.openai_completions_request:
+        raise AssertionError("OpenAI completions payload must include a prompt")
     if "input" not in current.openai_embeddings_request or not current.openai_embeddings_request["input"]:
         raise AssertionError("OpenAI embeddings payload must include at least one input string")
+    if "input" not in current.openai_moderations_request:
+        raise AssertionError("OpenAI moderations payload must include input")
     if current.openai_realtime_request.get("type") != "session.update":
         raise AssertionError("OpenAI realtime payload must be a session.update event")
     if "input" not in current.openai_audio_speech_request:
@@ -339,7 +556,53 @@ def assert_endpoint_payload_compatibility(report: EndpointCompatibilityReport | 
         raise AssertionError("OpenAI image edit payload must include an image")
     if "prompt" not in current.openai_video_generation_request:
         raise AssertionError("OpenAI video generation payload must include a prompt")
+    if current.vllm_responses_request["input"][0]["role"] != "system":
+        raise AssertionError("vLLM Responses payload must contain a system role")
+    if current.vllm_chat_request["messages"][0]["role"] != "system":
+        raise AssertionError("vLLM Chat payload must start with a system message")
+    if "prompt" not in current.vllm_completions_request:
+        raise AssertionError("vLLM completions payload must include a prompt")
+    if "input" not in current.vllm_embeddings_request or not current.vllm_embeddings_request["input"]:
+        raise AssertionError("vLLM embeddings payload must include at least one input string")
+    if "file" not in current.vllm_audio_transcription_request:
+        raise AssertionError("vLLM audio transcription payload must include a file")
+    if "file" not in current.vllm_audio_translation_request:
+        raise AssertionError("vLLM audio translation payload must include a file")
+    if current.vllm_realtime_request.get("type") != "session.update":
+        raise AssertionError("vLLM realtime payload must be a session.update event")
+    if "text_1" not in current.vllm_score_request or "text_2" not in current.vllm_score_request:
+        raise AssertionError("vLLM score payload must include text_1 and text_2")
     if "contents" not in current.gemini_generate_content_request:
         raise AssertionError("Gemini generateContent payload must include contents")
     if "contents" not in current.gemini_count_tokens_request:
         raise AssertionError("Gemini countTokens payload must include contents")
+
+
+__all__ = [
+    "EndpointCompatibilityReport",
+    "assert_endpoint_payload_compatibility",
+    "build_endpoint_compatibility_report",
+    "build_gemini_count_tokens_request",
+    "build_gemini_generate_content_request",
+    "build_openai_audio_speech_request",
+    "build_openai_audio_transcription_request",
+    "build_openai_audio_translation_request",
+    "build_openai_chat_completions_request",
+    "build_openai_completions_request",
+    "build_openai_embeddings_request",
+    "build_openai_image_edit_request",
+    "build_openai_image_generation_request",
+    "build_openai_moderations_request",
+    "build_openai_realtime_session_request",
+    "build_openai_responses_request",
+    "build_openai_video_generation_request",
+    "build_vllm_audio_transcription_request",
+    "build_vllm_audio_translation_request",
+    "build_vllm_chat_completions_request",
+    "build_vllm_completions_request",
+    "build_vllm_embeddings_request",
+    "build_vllm_realtime_session_request",
+    "build_vllm_responses_request",
+    "build_vllm_score_request",
+    "extract_gemini_text",
+]

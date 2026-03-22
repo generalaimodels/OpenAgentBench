@@ -1,6 +1,6 @@
 # Tests
 
-This folder contains the verification surface for the `agent_data` and `agent_retrieval` modules.
+This folder contains the verification surface for the `agent_data`, `agent_retrieval`, and `agent_memory` modules.
 
 ## Files
 
@@ -54,6 +54,52 @@ API-surface checks for:
   - dual-model reranking retrieval
   - agentic-loop retrieval
 - Gemini smoke failure contract
+
+### [`test_agent_memory.py`](/mnt/c/Users/heman/Desktop/code/Agentic_frame_work/OpenAgentBench/tests/test_agent_memory.py)
+
+Memory-layer execution checks for:
+
+- session, local, and global memory separation
+- working-memory compaction and multimodal externalization
+- session summary preservation of corrections and decisions
+- promotion routing into procedural memory
+
+### [`test_agent_memory_compat.py`](/mnt/c/Users/heman/Desktop/code/Agentic_frame_work/OpenAgentBench/tests/test_agent_memory_compat.py)
+
+Compatibility-focused memory checks for:
+
+- OpenAI-compatible tool-payload shapes for memory operations
+- provider-suite interoperability with OpenAI-compatible embeddings and responses
+
+### [`test_agent_memory_sql.py`](/mnt/c/Users/heman/Desktop/code/Agentic_frame_work/OpenAgentBench/tests/test_agent_memory_sql.py)
+
+SQL and schema checks for:
+
+- user-scoped local/global/session retrieval templates
+- checkpoint, audit, and cache template construction
+- additive schema migration presence for the memory extension
+
+### [`test_agent_memory_api.py`](/mnt/c/Users/heman/Desktop/code/Agentic_frame_work/OpenAgentBench/tests/test_agent_memory_api.py)
+
+API-surface checks for:
+
+- public runtime asset resolution
+- exported memory tool definitions
+- compiler visibility from the package surface
+
+### [`test_agent_integration_matrix.py`](/mnt/c/Users/heman/Desktop/code/Agentic_frame_work/OpenAgentBench/tests/test_agent_integration_matrix.py)
+
+Cross-module integration checks for:
+
+- `agent_data` + `agent_retrieval` + `agent_memory` combined message flow
+- session, local, and global memory isolation inside the integrated stack
+- scenario matrix coverage for:
+  - normal session-heavy queries
+  - multimodal MIMO queries
+  - thinking/reasoning queries
+  - agentic-loop queries
+- API payload compatibility across retrieval and memory tool surfaces
+- schema/runtime asset presence across all three modules
 
 ## Success Signals
 

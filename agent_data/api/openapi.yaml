@@ -1,0 +1,690 @@
+openapi: 3.1.0
+info:
+  title: OpenAgentBench Agent Data API
+  version: 0.2.0
+  description: >
+    Memory, session, history, multimodal content, and lossless API-trace
+    contracts for the PostgreSQL-backed agent-data subsystem.
+servers:
+  - url: http://localhost:8000
+paths:
+  /v1/openai/endpoints:
+    get:
+      summary: List OpenAI-compatible endpoints supported by the module
+      operationId: listOpenAIEndpoints
+      responses:
+        '200':
+          description: Endpoint catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OpenAIEndpoint'
+  /v1/users/{user_id}/sessions:
+    post:
+      summary: Create a session
+      operationId: createSession
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+      responses:
+        '201':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+  /v1/users/{user_id}/sessions/{session_id}/messages:
+    post:
+      summary: Append messages, optional raw API call data, and optional stream events
+      operationId: appendMessages
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppendMessagesRequest'
+      responses:
+        '202':
+          description: Messages persisted and downstream jobs scheduled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppendMessagesResponse'
+  /v1/users/{user_id}/sessions/{session_id}/context:compile:
+    post:
+      summary: Compile a bounded context window
+      operationId: compileContext
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompileContextRequest'
+      responses:
+        '200':
+          description: OpenAI-compatible context payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompileContextResponse'
+  /v1/users/{user_id}/memories:
+    get:
+      summary: List memories for a user
+      operationId: listMemories
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+        - name: memory_tier
+          in: query
+          schema:
+            type: integer
+        - name: memory_scope
+          in: query
+          schema:
+            type: integer
+        - name: is_active
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Memory list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Memory'
+    post:
+      summary: Upsert a memory record
+      operationId: upsertMemory
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertMemoryRequest'
+      responses:
+        '200':
+          description: Memory upserted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Memory'
+  /v1/users/{user_id}/sessions/{session_id}/api-calls:
+    get:
+      summary: List raw model/API calls captured for a session
+      operationId: listApiCalls
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: API invocation log
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/APIInvocation'
+  /v1/users/{user_id}/api-calls/{api_call_id}/events:
+    get:
+      summary: List ordered stream events for one API call
+      operationId: listApiStreamEvents
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/ApiCallId'
+      responses:
+        '200':
+          description: Stream event log
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/APIStreamEvent'
+  /v1/users/{user_id}/sessions/{session_id}/protocol-events:
+    get:
+      summary: List MCP, JSON-RPC, and tool-call protocol events for a session
+      operationId: listProtocolEvents
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: Protocol event log
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ProtocolEvent'
+  /v1/maintenance/run:
+    post:
+      summary: Trigger maintenance tasks
+      operationId: runMaintenance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tasks]
+              properties:
+                tasks:
+                  type: array
+                  items:
+                    type: string
+                    enum: [promotion, expiry, compaction]
+      responses:
+        '202':
+          description: Maintenance accepted
+components:
+  parameters:
+    UserId:
+      name: user_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SessionId:
+      name: session_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ApiCallId:
+      name: api_call_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    ChatMessage:
+      type: object
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [system, user, assistant, tool, function]
+        content:
+          oneOf:
+            - type: string
+            - type: 'null'
+            - type: array
+              items:
+                $ref: '#/components/schemas/ContentPart'
+        name:
+          type: [string, 'null']
+        tool_calls:
+          type: [array, 'null']
+          items:
+            type: object
+            additionalProperties: true
+        tool_call_id:
+          type: [string, 'null']
+    ContentPart:
+      oneOf:
+        - $ref: '#/components/schemas/InputTextPart'
+        - $ref: '#/components/schemas/InputImagePart'
+        - $ref: '#/components/schemas/InputAudioPart'
+        - $ref: '#/components/schemas/InputVideoPart'
+        - $ref: '#/components/schemas/InputFilePart'
+        - $ref: '#/components/schemas/GenericContentPart'
+    InputTextPart:
+      type: object
+      required: [type, text]
+      properties:
+        type:
+          const: input_text
+        text:
+          type: string
+    InputImagePart:
+      type: object
+      required: [type]
+      properties:
+        type:
+          const: input_image
+        image_url:
+          type: [string, 'null']
+        file_id:
+          type: [string, 'null']
+        detail:
+          type: [string, 'null']
+    InputAudioPart:
+      type: object
+      required: [type]
+      properties:
+        type:
+          const: input_audio
+        audio_url:
+          type: [string, 'null']
+        file_id:
+          type: [string, 'null']
+        format:
+          type: [string, 'null']
+        transcript:
+          type: [string, 'null']
+    InputVideoPart:
+      type: object
+      required: [type]
+      properties:
+        type:
+          const: input_video
+        video_url:
+          type: [string, 'null']
+        file_id:
+          type: [string, 'null']
+        poster_image_url:
+          type: [string, 'null']
+    InputFilePart:
+      type: object
+      required: [type]
+      properties:
+        type:
+          const: input_file
+        file_id:
+          type: [string, 'null']
+        filename:
+          type: [string, 'null']
+        mime_type:
+          type: [string, 'null']
+    GenericContentPart:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+      additionalProperties: true
+    Session:
+      type: object
+      required:
+        - session_id
+        - user_id
+        - status
+        - model_id
+        - context_window_size
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        status:
+          type: integer
+        model_id:
+          type: string
+        context_window_size:
+          type: integer
+        system_prompt_tokens:
+          type: integer
+        max_response_tokens:
+          type: integer
+        summary_text:
+          type: [string, 'null']
+        metadata:
+          type: object
+          additionalProperties: true
+    Memory:
+      type: object
+      required:
+        - memory_id
+        - user_id
+        - memory_tier
+        - memory_scope
+        - content_text
+        - token_count
+      properties:
+        memory_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        session_id:
+          type: [string, 'null']
+          format: uuid
+        memory_tier:
+          type: integer
+        memory_scope:
+          type: integer
+        content_text:
+          type: string
+        confidence:
+          type: number
+        token_count:
+          type: integer
+        tags:
+          type: array
+          items:
+            type: string
+        metadata:
+          type: object
+          additionalProperties: true
+    APIInvocation:
+      type: object
+      required:
+        - api_call_id
+        - provider
+        - endpoint
+        - model_id
+        - request_payload
+        - usage_payload
+        - started_at
+        - succeeded
+        - stream_mode
+      properties:
+        api_call_id:
+          type: string
+          format: uuid
+        session_id:
+          type: string
+          format: uuid
+        provider:
+          type: string
+        endpoint:
+          type: string
+        model_id:
+          type: string
+        request_payload:
+          type: object
+          additionalProperties: true
+        response_payload:
+          type: [object, 'null']
+          additionalProperties: true
+        usage_payload:
+          type: object
+          additionalProperties: true
+        error_payload:
+          type: [object, 'null']
+          additionalProperties: true
+        request_id:
+          type: [string, 'null']
+        status_code:
+          type: [integer, 'null']
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: [string, 'null']
+          format: date-time
+        latency_ms:
+          type: [integer, 'null']
+        succeeded:
+          type: boolean
+        stream_mode:
+          type: boolean
+        input_token_count:
+          type: integer
+        output_token_count:
+          type: integer
+        cached_input_token_count:
+          type: integer
+        reasoning_token_count:
+          type: integer
+        metadata:
+          type: object
+          additionalProperties: true
+    APIStreamEvent:
+      type: object
+      required:
+        - api_call_id
+        - event_index
+        - event_type
+        - token_count
+        - payload
+        - created_at
+      properties:
+        api_call_id:
+          type: string
+          format: uuid
+        event_index:
+          type: integer
+        event_type:
+          type: string
+        text_delta:
+          type: [string, 'null']
+        token_count:
+          type: integer
+        payload:
+          type: object
+          additionalProperties: true
+        binary_payload_base64:
+          type: [string, 'null']
+        mime_type:
+          type: [string, 'null']
+        created_at:
+          type: string
+          format: date-time
+    ProtocolEvent:
+      type: object
+      required:
+        - protocol_event_id
+        - session_id
+        - protocol_type
+        - direction
+        - payload
+        - created_at
+      properties:
+        protocol_event_id:
+          type: string
+          format: uuid
+        session_id:
+          type: string
+          format: uuid
+        api_call_id:
+          type: [string, 'null']
+          format: uuid
+        message_id:
+          type: [string, 'null']
+          format: uuid
+        protocol_type:
+          type: string
+          enum: [mcp, jsonrpc, tool_call, http, custom]
+        direction:
+          type: string
+          enum: [request, response, notification, event]
+        method:
+          type: [string, 'null']
+        rpc_id:
+          type: [string, 'null']
+        tool_name:
+          type: [string, 'null']
+        tool_call_id:
+          type: [string, 'null']
+        payload:
+          type: object
+          additionalProperties: true
+        binary_payload_base64:
+          type: [string, 'null']
+        mime_type:
+          type: [string, 'null']
+        created_at:
+          type: string
+          format: date-time
+    OpenAIEndpoint:
+      type: object
+      required:
+        - name
+        - path
+        - python_sdk_call
+        - input_modalities
+        - output_modalities
+        - supports_mixed_content
+        - notes
+        - source_url
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+        python_sdk_call:
+          type: string
+        input_modalities:
+          type: array
+          items:
+            type: string
+        output_modalities:
+          type: array
+          items:
+            type: string
+        supports_mixed_content:
+          type: boolean
+        notes:
+          type: string
+        source_url:
+          type: string
+          format: uri
+    CreateSessionRequest:
+      type: object
+      required:
+        - model_id
+        - context_window_size
+        - system_prompt_text
+        - system_prompt_tokens
+        - expires_at
+      properties:
+        model_id:
+          type: string
+        context_window_size:
+          type: integer
+        system_prompt_text:
+          type: string
+        system_prompt_tokens:
+          type: integer
+        max_response_tokens:
+          type: integer
+        temperature:
+          type: number
+        top_p:
+          type: number
+        expires_at:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+          additionalProperties: true
+    AppendMessagesRequest:
+      type: object
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+        api_call:
+          oneOf:
+            - $ref: '#/components/schemas/APIInvocation'
+            - type: 'null'
+        stream_events:
+          type: array
+          items:
+            $ref: '#/components/schemas/APIStreamEvent'
+        protocol_events:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProtocolEvent'
+        prompt_tokens:
+          type: integer
+        completion_tokens:
+          type: integer
+        latency_ms:
+          type: integer
+    AppendMessagesResponse:
+      type: object
+      required: [accepted, scheduled_jobs]
+      properties:
+        accepted:
+          type: boolean
+        api_call_id:
+          type: [string, 'null']
+          format: uuid
+        scheduled_jobs:
+          type: array
+          items:
+            type: string
+    CompileContextRequest:
+      type: object
+      required: [query_text]
+      properties:
+        query_text:
+          type: string
+        task_type:
+          type: string
+          enum:
+            - continuation
+            - knowledge_intensive
+            - new_session_with_history
+            - tool_heavy
+        tool_token_budget:
+          type: integer
+        memory_budget_override:
+          type: integer
+        history_budget_override:
+          type: integer
+        metadata:
+          type: object
+          additionalProperties: true
+    CompileContextResponse:
+      type: object
+      required: [messages, task_type, tokens_used]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+        task_type:
+          type: string
+        tokens_used:
+          type: integer
+        selected_memory_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        selected_message_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+    UpsertMemoryRequest:
+      allOf:
+        - $ref: '#/components/schemas/Memory'

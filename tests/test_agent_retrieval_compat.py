@@ -26,7 +26,14 @@ class EndpointCompatibilityTests(unittest.TestCase):
 
         self.assertEqual(report.openai_responses_request["input"][0]["role"], "system")
         self.assertEqual(report.openai_chat_request["messages"][0]["role"], "system")
+        self.assertIn("prompt", report.openai_completions_request)
         self.assertEqual(report.openai_embeddings_request["model"], "text-embedding-3-small")
+        self.assertIn("input", report.openai_moderations_request)
+        self.assertEqual(report.vllm_responses_request["input"][0]["role"], "system")
+        self.assertEqual(report.vllm_chat_request["messages"][0]["role"], "system")
+        self.assertIn("prompt", report.vllm_completions_request)
+        self.assertEqual(report.vllm_realtime_request["type"], "session.update")
+        self.assertIn("text_1", report.vllm_score_request)
         self.assertIn("contents", report.gemini_generate_content_request)
 
 

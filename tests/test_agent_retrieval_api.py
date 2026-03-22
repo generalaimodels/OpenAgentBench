@@ -46,12 +46,20 @@ from openagentbench.agent_retrieval import (
     build_load_memory_summary,
     build_load_session_context,
     build_openai_chat_completions_request,
+    build_openai_completions_request,
     build_openai_embeddings_request,
     build_openai_image_edit_request,
     build_openai_image_generation_request,
+    build_openai_moderations_request,
     build_openai_realtime_session_request,
     build_openai_responses_request,
     build_openai_video_generation_request,
+    build_vllm_chat_completions_request,
+    build_vllm_completions_request,
+    build_vllm_embeddings_request,
+    build_vllm_realtime_session_request,
+    build_vllm_responses_request,
+    build_vllm_score_request,
     build_semantic_retrieval,
     build_touch_memory_access,
     build_upsert_memory_entry,
@@ -157,17 +165,68 @@ class RetrievalApiBuilderTests(unittest.TestCase):
             user_input="Summarize the endpoint choice.",
             context=("Use OpenAI embeddings.",),
         )
+        completion_payload = build_openai_completions_request(
+            model="gpt-3.5-turbo-instruct",
+            prompt="Summarize the endpoint choice.",
+        )
         embedding_payload = build_openai_embeddings_request(
             model="text-embedding-3-large",
             inputs=("retrieval", "reranking"),
             dimensions=256,
         )
+        moderation_payload = build_openai_moderations_request(
+            model="omni-moderation-latest",
+            inputs=("Summarize the endpoint choice.",),
+        )
 
         self.assertEqual(responses_payload["input"][0]["role"], "system")
         self.assertEqual(responses_payload["reasoning"]["effort"], "medium")
         self.assertEqual(chat_payload["messages"][0]["role"], "system")
+        self.assertEqual(completion_payload["prompt"], "Summarize the endpoint choice.")
         self.assertEqual(embedding_payload["dimensions"], 256)
         self.assertEqual(embedding_payload["input"], ["retrieval", "reranking"])
+        self.assertEqual(moderation_payload["input"], ["Summarize the endpoint choice."])
+
+    def test_vllm_payload_builders_emit_openai_compatible_shapes(self) -> None:
+        responses_payload = build_vllm_responses_request(
+            model="meta-llama/Meta-Llama-3.1-8B-Instruct",
+            system_prompt="You are a retrieval planner.",
+            user_input="Summarize the endpoint choice.",
+            context=("Use OpenAI embeddings.", "Use vLLM for reranking."),
+            reasoning_effort="medium",
+        )
+        chat_payload = build_vllm_chat_completions_request(
+            model="meta-llama/Meta-Llama-3.1-8B-Instruct",
+            system_prompt="You are a retrieval planner.",
+            user_input="Summarize the endpoint choice.",
+            context=("Use OpenAI embeddings.",),
+        )
+        completions_payload = build_vllm_completions_request(
+            model="meta-llama/Meta-Llama-3.1-8B-Instruct",
+            prompt="Summarize the endpoint choice.",
+        )
+        embeddings_payload = build_vllm_embeddings_request(
+            model="intfloat/e5-small-v2",
+            inputs=("retrieval", "reranking"),
+        )
+        realtime_payload = build_vllm_realtime_session_request(
+            model="openai/whisper-small",
+            modalities=("audio",),
+            instructions="Stay concise.",
+        )
+        score_payload = build_vllm_score_request(
+            model="BAAI/bge-reranker-base",
+            text_1="retrieval",
+            text_2=("reranking", "vision"),
+        )
+
+        self.assertEqual(responses_payload["input"][0]["role"], "system")
+        self.assertEqual(chat_payload["messages"][0]["role"], "system")
+        self.assertEqual(completions_payload["prompt"], "Summarize the endpoint choice.")
+        self.assertEqual(embeddings_payload["input"], ["retrieval", "reranking"])
+        self.assertEqual(realtime_payload["type"], "session.update")
+        self.assertEqual(score_payload["text_1"], "retrieval")
+        self.assertEqual(score_payload["text_2"], ["reranking", "vision"])
 
     def test_full_openai_endpoint_matrix_payload_builders_emit_expected_shapes(self) -> None:
         realtime_payload = build_openai_realtime_session_request(
@@ -245,13 +304,20 @@ class RetrievalApiBuilderTests(unittest.TestCase):
         assert_endpoint_payload_compatibility(report)
         self.assertIn("input", report.openai_responses_request)
         self.assertIn("messages", report.openai_chat_request)
+        self.assertIn("prompt", report.openai_completions_request)
         self.assertEqual(report.openai_realtime_request["type"], "session.update")
+        self.assertIn("input", report.openai_moderations_request)
         self.assertIn("input", report.openai_audio_speech_request)
         self.assertIn("file", report.openai_audio_transcription_request)
         self.assertIn("file", report.openai_audio_translation_request)
         self.assertIn("prompt", report.openai_image_generation_request)
         self.assertIn("image", report.openai_image_edit_request)
         self.assertIn("prompt", report.openai_video_generation_request)
+        self.assertIn("input", report.vllm_responses_request)
+        self.assertIn("messages", report.vllm_chat_request)
+        self.assertIn("prompt", report.vllm_completions_request)
+        self.assertEqual(report.vllm_realtime_request["type"], "session.update")
+        self.assertIn("text_1", report.vllm_score_request)
         self.assertIn("contents", report.gemini_generate_content_request)
 
     def test_endpoint_compatibility_report_fails_for_invalid_openai_responses_shape(self) -> None:

@@ -26,6 +26,7 @@ from .models import (
     SessionRecord,
 )
 from .openai_catalog import OPENAI_ENDPOINTS, OpenAIEndpointSpec, endpoints_for_modality
+from .vllm_catalog import VLLM_ENDPOINTS, VLLMEndpointSpec, vllm_endpoints_for_modality
 from .packing import pack_memories, select_contiguous_history_suffix
 from .queries import (
     build_fetch_active_history,
@@ -56,6 +57,8 @@ __all__ = [
     "MessageRole",
     "OPENAI_ENDPOINTS",
     "OpenAIEndpointSpec",
+    "VLLM_ENDPOINTS",
+    "VLLMEndpointSpec",
     "PROMOTION_RULES",
     "ProtocolEventRecord",
     "ProvenanceType",
@@ -88,4 +91,5 @@ __all__ = [
     "promotion_utility",
     "score_memories",
     "select_contiguous_history_suffix",
+    "vllm_endpoints_for_modality",
 ]
