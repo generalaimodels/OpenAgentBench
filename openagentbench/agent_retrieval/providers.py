@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import math
 from dataclasses import dataclass, field
-from typing import Any, Protocol, Sequence
+from typing import Any, Iterator, Protocol, Sequence
 
 from .scoring import cosine_similarity, lexical_overlap_score, tokenize
 from .types import EmbeddingVector
@@ -121,23 +121,35 @@ def _extract_openai_text(response: Any) -> str:
     output = getattr(response, "output", None)
     if output:
         for item in output:
-            content = getattr(item, "content", None) or item.get("content", [])
+            content = getattr(item, "content", None)
+            if content is None and isinstance(item, dict):
+                content = item.get("content", [])
+            if not content:
+                continue
             for part in content:
-                part_text = getattr(part, "text", None) or part.get("text")
+                part_text = getattr(part, "text", None)
+                if part_text is None and isinstance(part, dict):
+                    part_text = part.get("text")
                 if isinstance(part_text, str) and part_text:
                     return part_text
 
     choices = getattr(response, "choices", None)
     if choices:
         first = choices[0]
-        message = getattr(first, "message", None) or first.get("message", {})
-        content = getattr(message, "content", None) or message.get("content")
+        message = getattr(first, "message", None)
+        if message is None and isinstance(first, dict):
+            message = first.get("message", {})
+        content = getattr(message, "content", None)
+        if content is None and isinstance(message, dict):
+            content = message.get("content")
         if isinstance(content, str):
             return content
         if isinstance(content, list):
             parts = []
             for part in content:
-                text = getattr(part, "text", None) or part.get("text")
+                text = getattr(part, "text", None)
+                if text is None and isinstance(part, dict):
+                    text = part.get("text")
                 if isinstance(text, str):
                     parts.append(text)
             if parts:
@@ -204,6 +216,30 @@ class OpenAICompatibleTextModel:
     model: str
     prefer_responses_api: bool = True
     reasoning_effort: str | None = None
+    store: bool | None = None
+
+    def _responses_kwargs(
+        self,
+        *,
+        system_prompt: str,
+        user_input: str,
+        context: Sequence[str],
+        max_tokens: int,
+    ) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "input": _build_openai_responses_input(
+                system_prompt=system_prompt,
+                user_input=user_input,
+                context=context,
+            ),
+            "max_output_tokens": max_tokens,
+        }
+        if self.reasoning_effort is not None and self.reasoning_effort != "none":
+            kwargs["reasoning"] = {"effort": self.reasoning_effort}
+        if self.store is not None:
+            kwargs["store"] = self.store
+        return kwargs
 
     def complete(
         self,
@@ -215,19 +251,14 @@ class OpenAICompatibleTextModel:
         temperature: float = 0.0,
     ) -> str:
         if self.prefer_responses_api and hasattr(self.client, "responses"):
-            kwargs: dict[str, Any] = {
-                "model": self.model,
-                "input": _build_openai_responses_input(
+            response = self.client.responses.create(
+                **self._responses_kwargs(
                     system_prompt=system_prompt,
                     user_input=user_input,
                     context=context,
-                ),
-                "max_output_tokens": max_tokens,
-                "temperature": temperature,
-            }
-            if self.reasoning_effort is not None and self.reasoning_effort != "none":
-                kwargs["reasoning"] = {"effort": self.reasoning_effort}
-            response = self.client.responses.create(**kwargs)
+                    max_tokens=max_tokens,
+                )
+            )
             return _extract_openai_text(response).strip()
 
         if hasattr(self.client, "chat") and hasattr(self.client.chat, "completions"):
@@ -243,6 +274,38 @@ class OpenAICompatibleTextModel:
             )
             return _extract_openai_text(response).strip()
         raise ValueError("client does not expose an OpenAI-compatible text endpoint")
+
+    def stream_complete(
+        self,
+        *,
+        system_prompt: str,
+        user_input: str,
+        context: Sequence[str] = (),
+        max_tokens: int = 256,
+    ) -> Iterator[str]:
+        if self.prefer_responses_api and hasattr(self.client, "responses") and hasattr(self.client.responses, "stream"):
+            with self.client.responses.stream(
+                **self._responses_kwargs(
+                    system_prompt=system_prompt,
+                    user_input=user_input,
+                    context=context,
+                    max_tokens=max_tokens,
+                )
+            ) as stream:
+                for event in stream:
+                    if event.type == "response.output_text.delta" and event.delta:
+                        yield event.delta
+                stream.get_final_response()
+            return
+        text = self.complete(
+            system_prompt=system_prompt,
+            user_input=user_input,
+            context=context,
+            max_tokens=max_tokens,
+            temperature=0.0,
+        )
+        if text:
+            yield text
 
 
 def _extract_gemini_text(response: Any) -> str:
@@ -307,7 +370,11 @@ class LLMQueryPlanner:
 
     def resolve_coreferences(self, query: str, conversation: Sequence[str]) -> str:
         return self.text_model.complete(
-            system_prompt="Resolve all pronouns and references using the conversation. Return only the resolved query.",
+            system_prompt=(
+                "Resolve all pronouns and references using the conversation, but preserve the user's task as an "
+                "actionable query for another execution system. Do not answer the task, refuse it, or describe "
+                "tool limitations. Return only the rewritten query."
+            ),
             user_input=query,
             context=conversation,
             max_tokens=128,
@@ -317,8 +384,8 @@ class LLMQueryPlanner:
     def decompose_query(self, query: str, *, max_subqueries: int) -> Sequence[str]:
         response = self.text_model.complete(
             system_prompt=(
-                "Split the query into independent subqueries. "
-                "Return one subquery per line with no numbering or commentary."
+                "Split the query into independent executable subqueries for another planner. "
+                "Do not answer the task or add commentary. Return one subquery per line with no numbering."
             ),
             user_input=query,
             max_tokens=256,
@@ -329,7 +396,10 @@ class LLMQueryPlanner:
 
     def expand_query(self, query: str) -> str:
         return self.text_model.complete(
-            system_prompt="Rewrite the query to improve retrieval recall while preserving intent. Return only the rewritten query.",
+            system_prompt=(
+                "Rewrite the query to improve retrieval recall while preserving the requested action, tools, "
+                "entities, and constraints. Do not answer the task. Return only the rewritten query."
+            ),
             user_input=query,
             max_tokens=128,
             temperature=0.2,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from typing import Any, Iterable, Sequence
 
 from openagentbench.agent_data import OPENAI_ENDPOINTS, VLLM_ENDPOINTS
@@ -26,7 +27,7 @@ from openagentbench.agent_retrieval import (
 )
 
 from .catalog import build_default_tool_definitions
-from .models import ParsedToolCall, ToolDescriptor, ToolEndpointCompatibilityReport
+from .models import ParsedToolCall, ToolDescriptor, ToolEndpointCompatibilityReport, ToolResultTurn
 from .registry import validate_against_schema
 
 
@@ -52,9 +53,84 @@ def _normalize_tool_definition(tool: ToolDescriptor | dict[str, Any]) -> dict[st
     }
 
 
-def _tool_schema_map(selected_tools: Iterable[ToolDescriptor | dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def _tool_schema_map(
+    selected_tools: Iterable[ToolDescriptor | dict[str, Any]],
+    *,
+    provider: str | None = None,
+) -> dict[str, tuple[str, dict[str, Any]]]:
     normalized = [_normalize_tool_definition(tool) for tool in selected_tools]
-    return {entry["name"]: entry["input_schema"] for entry in normalized}
+    schema_map: dict[str, tuple[str, dict[str, Any]]] = {}
+    for entry in normalized:
+        canonical_name = entry["name"]
+        schema = entry["input_schema"]
+        schema_map[canonical_name] = (canonical_name, schema)
+        if provider in {"openai", "vllm"}:
+            schema_map[sanitize_tool_name(canonical_name)] = (canonical_name, schema)
+    return schema_map
+
+
+def _normalize_tool_result_turn(turn: ToolResultTurn | Mapping[str, Any]) -> ToolResultTurn:
+    if isinstance(turn, ToolResultTurn):
+        return turn
+    return ToolResultTurn(
+        call_id=str(turn["call_id"]),
+        tool_id=str(turn["tool_id"]),
+        output=turn.get("output"),
+    )
+
+
+def _serialize_tool_output(output: Any) -> str:
+    if isinstance(output, str):
+        return output
+    return json.dumps(output, sort_keys=True)
+
+
+def _google_tool_result_payload(output: Any) -> dict[str, Any]:
+    if isinstance(output, dict):
+        return dict(output)
+    if isinstance(output, list):
+        return {"items": list(output)}
+    return {"value": output}
+
+
+def _sample_value_from_schema(schema: Mapping[str, Any]) -> Any:
+    schema_type = schema.get("type")
+    if isinstance(schema_type, list) and schema_type:
+        schema_type = schema_type[0]
+
+    enum = schema.get("enum")
+    if isinstance(enum, list) and enum:
+        return enum[0]
+
+    if schema_type == "object":
+        properties = schema.get("properties", {})
+        required = schema.get("required", ())
+        sample: dict[str, Any] = {}
+        if isinstance(required, Sequence) and not isinstance(required, (str, bytes)) and isinstance(properties, Mapping):
+            for field_name in required:
+                if isinstance(field_name, str) and field_name in properties and isinstance(properties[field_name], Mapping):
+                    sample[field_name] = _sample_value_from_schema(properties[field_name])
+        return sample
+    if schema_type == "array":
+        items = schema.get("items", {})
+        if isinstance(items, Mapping):
+            return [_sample_value_from_schema(items)]
+        return []
+    if schema_type == "string":
+        minimum = schema.get("minLength")
+        length = minimum if isinstance(minimum, int) and minimum > 0 else 8
+        return "x" * min(length, 16)
+    if schema_type == "integer":
+        minimum = schema.get("minimum")
+        return int(minimum) if isinstance(minimum, (int, float)) else 1
+    if schema_type == "number":
+        minimum = schema.get("minimum")
+        return float(minimum) if isinstance(minimum, (int, float)) else 1.0
+    if schema_type == "boolean":
+        return False
+    if schema_type == "null":
+        return None
+    return "sample"
 
 
 def _guided_decoding_grammar(selected_tools: Sequence[ToolDescriptor | dict[str, Any]]) -> str:
@@ -141,7 +217,6 @@ def build_tool_enabled_openai_responses_request(
         ],
         "tools": format_tools_for_model(tools, "openai")["tools"],
         "max_output_tokens": max_output_tokens,
-        "temperature": 0.0,
     }
     if reasoning_effort != "none":
         payload["reasoning"] = {"effort": reasoning_effort}
@@ -172,6 +247,61 @@ def build_tool_enabled_openai_chat_request(
         "max_tokens": 384,
         "temperature": 0.0,
     }
+
+
+def build_openai_responses_tool_result_items(
+    tool_results: Sequence[ToolResultTurn | Mapping[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    return tuple(
+        {
+            "type": "function_call_output",
+            "call_id": normalized.call_id,
+            "output": _serialize_tool_output(normalized.output),
+        }
+        for normalized in (_normalize_tool_result_turn(turn) for turn in tool_results)
+    )
+
+
+def build_openai_chat_tool_result_messages(
+    tool_results: Sequence[ToolResultTurn | Mapping[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    return tuple(
+        {
+            "role": "tool",
+            "tool_call_id": normalized.call_id,
+            "name": sanitize_tool_name(normalized.tool_id),
+            "content": _serialize_tool_output(normalized.output),
+        }
+        for normalized in (_normalize_tool_result_turn(turn) for turn in tool_results)
+    )
+
+
+def build_anthropic_tool_result_blocks(
+    tool_results: Sequence[ToolResultTurn | Mapping[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    return tuple(
+        {
+            "type": "tool_result",
+            "tool_use_id": normalized.call_id,
+            "content": [{"type": "text", "text": _serialize_tool_output(normalized.output)}],
+            "is_error": False,
+        }
+        for normalized in (_normalize_tool_result_turn(turn) for turn in tool_results)
+    )
+
+
+def build_google_tool_result_parts(
+    tool_results: Sequence[ToolResultTurn | Mapping[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    return tuple(
+        {
+            "functionResponse": {
+                "name": normalized.tool_id,
+                "response": _google_tool_result_payload(normalized.output),
+            }
+        }
+        for normalized in (_normalize_tool_result_turn(turn) for turn in tool_results)
+    )
 
 
 def build_tool_enabled_openai_realtime_request(
@@ -271,12 +401,63 @@ def build_a2a_task_request() -> dict[str, Any]:
     }
 
 
+def _sample_tool_call_fixture(
+    tool_definitions: Sequence[ToolDescriptor | dict[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any], tuple[ToolResultTurn, ...]]:
+    normalized = [_normalize_tool_definition(tool) for tool in tool_definitions]
+    if not normalized:
+        raise ValueError("tool_definitions must contain at least one tool")
+
+    sample_tool = normalized[0]
+    sample_arguments = _sample_value_from_schema(sample_tool["input_schema"])
+    if not isinstance(sample_arguments, dict):
+        sample_arguments = {}
+    wire_name = sanitize_tool_name(sample_tool["name"])
+    responses_output = {
+        "output": [
+            {
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": wire_name,
+                "arguments": json.dumps(sample_arguments, sort_keys=True),
+            }
+        ]
+    }
+    chat_output = {
+        "choices": [
+            {
+                "message": {
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "function": {
+                                "name": wire_name,
+                                "arguments": json.dumps(sample_arguments, sort_keys=True),
+                            },
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+    tool_results = (
+        ToolResultTurn(
+            call_id="call_1",
+            tool_id=sample_tool["name"],
+            output={"status": "ok", "tool": sample_tool["name"]},
+        ),
+    )
+    return responses_output, chat_output, tool_results
+
+
 def build_agent_tools_endpoint_compatibility_report(
     selected_tools: Sequence[ToolDescriptor | dict[str, Any]] | None = None,
 ) -> ToolEndpointCompatibilityReport:
     tool_definitions = tuple(selected_tools or build_default_tool_definitions())
     retrieval_report: EndpointCompatibilityReport = build_endpoint_compatibility_report()
     memory_report: MemoryEndpointCompatibilityReport = build_memory_endpoint_compatibility_report()
+    sample_responses_output, sample_chat_output, sample_tool_results = _sample_tool_call_fixture(tool_definitions)
 
     sample_user_content = (
         {"type": "input_text", "text": "Read memory, inspect tool coverage, and emit structured output."},
@@ -357,10 +538,62 @@ def build_agent_tools_endpoint_compatibility_report(
             arguments={"query": "global rules"},
         ),
         a2a_task_request=build_a2a_task_request(),
+        openai_responses_tool_result_items=build_openai_responses_tool_result_items(sample_tool_results),
+        openai_chat_tool_messages=build_openai_chat_tool_result_messages(sample_tool_results),
+        anthropic_tool_result_blocks=build_anthropic_tool_result_blocks(sample_tool_results),
+        google_tool_result_parts=build_google_tool_result_parts(sample_tool_results),
+        parsed_openai_responses_tool_calls=tuple(
+            parse_tool_call_from_model_output(
+                sample_responses_output,
+                "openai",
+                known_tools=tool_definitions,
+            )
+        ),
+        parsed_openai_chat_tool_calls=tuple(
+            parse_tool_call_from_model_output(
+                sample_chat_output,
+                "openai",
+                known_tools=tool_definitions,
+            )
+        ),
     )
 
 
-def _parse_openai_tool_calls(model_output: dict[str, Any]) -> list[tuple[str, str, dict[str, Any]]]:
+def _coerce_tool_arguments(raw_arguments: Any) -> tuple[dict[str, Any], str | None]:
+    if raw_arguments is None:
+        return {}, None
+    if isinstance(raw_arguments, str):
+        try:
+            decoded = json.loads(raw_arguments)
+        except json.JSONDecodeError as exc:
+            return {}, f"invalid JSON arguments: {exc.msg}"
+        if not isinstance(decoded, dict):
+            return {}, "tool arguments must decode to an object"
+        return decoded, None
+    if isinstance(raw_arguments, Mapping):
+        return dict(raw_arguments), None
+    return {}, "tool arguments must be an object"
+
+
+def _parse_openai_tool_calls(model_output: dict[str, Any]) -> list[tuple[str, str, dict[str, Any], str | None]]:
+    output = model_output.get("output")
+    if isinstance(output, list):
+        parsed: list[tuple[str, str, dict[str, Any], str | None]] = []
+        for index, item in enumerate(output):
+            if not isinstance(item, Mapping) or item.get("type") != "function_call":
+                continue
+            arguments, error = _coerce_tool_arguments(item.get("arguments", "{}"))
+            parsed.append(
+                (
+                    str(item.get("call_id") or item.get("id") or f"call_{index}"),
+                    str(item.get("name", "")),
+                    arguments,
+                    error,
+                )
+            )
+        if parsed:
+            return parsed
+
     choices = model_output.get("choices")
     if not isinstance(choices, list) or not choices:
         return []
@@ -368,28 +601,28 @@ def _parse_openai_tool_calls(model_output: dict[str, Any]) -> list[tuple[str, st
     tool_calls = message.get("tool_calls")
     if not isinstance(tool_calls, list):
         return []
-    parsed: list[tuple[str, str, dict[str, Any]]] = []
+    parsed = []
     for tool_call in tool_calls:
         function = tool_call.get("function", {})
-        raw_arguments = function.get("arguments", "{}")
-        arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else dict(raw_arguments)
-        parsed.append((str(tool_call.get("id", "")), str(function.get("name", "")), arguments))
+        arguments, error = _coerce_tool_arguments(function.get("arguments", "{}"))
+        parsed.append((str(tool_call.get("id", "")), str(function.get("name", "")), arguments, error))
     return parsed
 
 
-def _parse_anthropic_tool_calls(model_output: dict[str, Any]) -> list[tuple[str, str, dict[str, Any]]]:
+def _parse_anthropic_tool_calls(model_output: dict[str, Any]) -> list[tuple[str, str, dict[str, Any], str | None]]:
     content = model_output.get("content")
     if not isinstance(content, list):
         return []
-    parsed: list[tuple[str, str, dict[str, Any]]] = []
+    parsed: list[tuple[str, str, dict[str, Any], str | None]] = []
     for block in content:
         if block.get("type") != "tool_use":
             continue
-        parsed.append((str(block.get("id", "")), str(block.get("name", "")), dict(block.get("input", {}))))
+        arguments, error = _coerce_tool_arguments(block.get("input", {}))
+        parsed.append((str(block.get("id", "")), str(block.get("name", "")), arguments, error))
     return parsed
 
 
-def _parse_google_tool_calls(model_output: dict[str, Any]) -> list[tuple[str, str, dict[str, Any]]]:
+def _parse_google_tool_calls(model_output: dict[str, Any]) -> list[tuple[str, str, dict[str, Any], str | None]]:
     candidates = model_output.get("candidates")
     if not isinstance(candidates, list) or not candidates:
         return []
@@ -397,16 +630,18 @@ def _parse_google_tool_calls(model_output: dict[str, Any]) -> list[tuple[str, st
     parts = content.get("parts")
     if not isinstance(parts, list):
         return []
-    parsed: list[tuple[str, str, dict[str, Any]]] = []
+    parsed: list[tuple[str, str, dict[str, Any], str | None]] = []
     for index, part in enumerate(parts):
         function_call = part.get("functionCall") or part.get("function_call")
         if not isinstance(function_call, dict):
             continue
+        arguments, error = _coerce_tool_arguments(function_call.get("args", {}))
         parsed.append(
             (
                 f"google-call-{index}",
                 str(function_call.get("name", "")),
-                dict(function_call.get("args", {})),
+                arguments,
+                error,
             )
         )
     return parsed
@@ -418,7 +653,7 @@ def parse_tool_call_from_model_output(
     *,
     known_tools: Sequence[ToolDescriptor | dict[str, Any]] = (),
 ) -> list[ParsedToolCall]:
-    schema_map = _tool_schema_map(known_tools) if known_tools else {}
+    schema_map = _tool_schema_map(known_tools, provider=provider) if known_tools else {}
     if provider in {"openai", "vllm"}:
         raw_calls = _parse_openai_tool_calls(model_output)
     elif provider == "anthropic":
@@ -429,17 +664,30 @@ def parse_tool_call_from_model_output(
         raise ValueError(f"unsupported provider '{provider}'")
 
     parsed: list[ParsedToolCall] = []
-    for call_id, tool_id, params in raw_calls:
-        schema = schema_map.get(tool_id)
-        if schema is None:
+    for call_id, wire_tool_id, params, parse_error in raw_calls:
+        schema_binding = schema_map.get(wire_tool_id)
+        if schema_binding is None:
             parsed.append(
                 ParsedToolCall(
                     call_id=call_id,
-                    tool_id=tool_id,
+                    tool_id=wire_tool_id,
                     params=params,
                     model_format=provider,
                     valid=not schema_map,
-                    error=None if not schema_map else f"tool '{tool_id}' is unknown",
+                    error=None if not schema_map else f"tool '{wire_tool_id}' is unknown",
+                )
+            )
+            continue
+        canonical_tool_id, schema = schema_binding
+        if parse_error is not None:
+            parsed.append(
+                ParsedToolCall(
+                    call_id=call_id,
+                    tool_id=canonical_tool_id,
+                    params=params,
+                    model_format=provider,
+                    valid=False,
+                    error=parse_error,
                 )
             )
             continue
@@ -447,7 +695,7 @@ def parse_tool_call_from_model_output(
         parsed.append(
             ParsedToolCall(
                 call_id=call_id,
-                tool_id=tool_id,
+                tool_id=canonical_tool_id,
                 params=params,
                 model_format=provider,
                 valid=validation.valid,
@@ -470,6 +718,7 @@ def assert_agent_tools_endpoint_payload_compatibility(
     assert current.anthropic_tools_format["format"] == "anthropic_tools"
     assert current.google_tools_format["format"] == "google_tools"
     assert current.openai_responses_request["input"][0]["role"] == "system"
+    assert "temperature" not in current.openai_responses_request
     assert current.openai_chat_request["messages"][0]["role"] == "system"
     assert current.openai_realtime_request["session"]["tools"]
     assert "input" in current.openai_audio_speech_request
@@ -481,17 +730,27 @@ def assert_agent_tools_endpoint_payload_compatibility(
     assert current.jsonrpc_invoke_request["jsonrpc"] == "2.0"
     assert current.mcp_initialize_request["method"] == "initialize"
     assert current.a2a_task_request["message"]["role"] == "user"
+    assert current.openai_responses_tool_result_items[0]["type"] == "function_call_output"
+    assert current.openai_chat_tool_messages[0]["role"] == "tool"
+    assert current.anthropic_tool_result_blocks[0]["type"] == "tool_result"
+    assert "functionResponse" in current.google_tool_result_parts[0]
+    assert current.parsed_openai_responses_tool_calls[0].valid is True
+    assert current.parsed_openai_chat_tool_calls[0].valid is True
 
 
 __all__ = [
     "assert_agent_tools_endpoint_payload_compatibility",
     "build_a2a_task_request",
     "build_agent_tools_endpoint_compatibility_report",
+    "build_anthropic_tool_result_blocks",
+    "build_google_tool_result_parts",
     "build_jsonrpc_invoke_request",
     "build_jsonrpc_registry_request",
     "build_mcp_call_tool_request",
     "build_mcp_initialize_request",
     "build_mcp_list_tools_request",
+    "build_openai_chat_tool_result_messages",
+    "build_openai_responses_tool_result_items",
     "build_tool_enabled_openai_chat_request",
     "build_tool_enabled_openai_realtime_request",
     "build_tool_enabled_openai_responses_request",

@@ -25,7 +25,14 @@ from .models import (
     ScoredMemory,
     SessionRecord,
 )
-from .openai_catalog import OPENAI_ENDPOINTS, OpenAIEndpointSpec, endpoints_for_modality
+from .openai_catalog import (
+    OPENAI_ENDPOINTS,
+    OPENAI_HTTP_ENDPOINTS,
+    OpenAIEndpointSpec,
+    endpoints_for_category,
+    endpoints_for_lifecycle,
+    endpoints_for_modality,
+)
 from .vllm_catalog import VLLM_ENDPOINTS, VLLMEndpointSpec, vllm_endpoints_for_modality
 from .packing import pack_memories, select_contiguous_history_suffix
 from .queries import (
@@ -56,6 +63,7 @@ __all__ = [
     "MemoryTier",
     "MessageRole",
     "OPENAI_ENDPOINTS",
+    "OPENAI_HTTP_ENDPOINTS",
     "OpenAIEndpointSpec",
     "VLLM_ENDPOINTS",
     "VLLMEndpointSpec",
@@ -82,6 +90,8 @@ __all__ = [
     "classify_task_type",
     "compute_memory_score",
     "dumps",
+    "endpoints_for_category",
+    "endpoints_for_lifecycle",
     "endpoints_for_modality",
     "format_memory_block",
     "hash_normalized_text",

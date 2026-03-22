@@ -320,12 +320,19 @@ class ParsedToolCall:
 
 
 @dataclass(slots=True, frozen=True)
+class ToolResultTurn:
+    call_id: str
+    tool_id: str
+    output: JSONValue
+
+
+@dataclass(slots=True, frozen=True)
 class ToolEndpointCompatibilityReport:
     retrieval_report: Any
     memory_report: Any
     agent_data_endpoints: Sequence[Any]
     vllm_endpoints: Sequence[Any]
-    tool_definitions: tuple[dict[str, Any], ...]
+    tool_definitions: tuple[Any, ...]
     openai_tools_format: dict[str, Any]
     vllm_tools_format: dict[str, Any]
     anthropic_tools_format: dict[str, Any]
@@ -347,6 +354,12 @@ class ToolEndpointCompatibilityReport:
     mcp_list_tools_request: dict[str, Any]
     mcp_call_tool_request: dict[str, Any]
     a2a_task_request: dict[str, Any]
+    openai_responses_tool_result_items: tuple[dict[str, Any], ...]
+    openai_chat_tool_messages: tuple[dict[str, Any], ...]
+    anthropic_tool_result_blocks: tuple[dict[str, Any], ...]
+    google_tool_result_parts: tuple[dict[str, Any], ...]
+    parsed_openai_responses_tool_calls: tuple[ParsedToolCall, ...]
+    parsed_openai_chat_tool_calls: tuple[ParsedToolCall, ...]
 
 
 __all__ = [
@@ -373,5 +386,6 @@ __all__ = [
     "ToolEndpointCompatibilityReport",
     "ToolInvocationRequest",
     "ToolInvocationResponse",
+    "ToolResultTurn",
     "ToolSchemaSummary",
 ]

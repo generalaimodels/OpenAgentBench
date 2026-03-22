@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
+from openagentbench.agent_data import OPENAI_HTTP_ENDPOINTS
 from openagentbench.agent_retrieval import (
     AuthorityTier,
     HistoryEntry,
@@ -35,6 +36,7 @@ from openagentbench.agent_retrieval import (
     TaskOutcome,
     assert_endpoint_payload_compatibility,
     build_endpoint_compatibility_report,
+    build_openai_http_endpoint_examples,
     build_openai_audio_speech_request,
     build_openai_audio_transcription_request,
     build_openai_audio_translation_request,
@@ -181,6 +183,7 @@ class RetrievalApiBuilderTests(unittest.TestCase):
 
         self.assertEqual(responses_payload["input"][0]["role"], "system")
         self.assertEqual(responses_payload["reasoning"]["effort"], "medium")
+        self.assertNotIn("temperature", responses_payload)
         self.assertEqual(chat_payload["messages"][0]["role"], "system")
         self.assertEqual(completion_payload["prompt"], "Summarize the endpoint choice.")
         self.assertEqual(embedding_payload["dimensions"], 256)
@@ -302,6 +305,8 @@ class RetrievalApiBuilderTests(unittest.TestCase):
     def test_endpoint_compatibility_report_passes_validation(self) -> None:
         report = build_endpoint_compatibility_report()
         assert_endpoint_payload_compatibility(report)
+        self.assertEqual(report.openai_http_endpoints, OPENAI_HTTP_ENDPOINTS)
+        self.assertEqual(set(report.openai_http_endpoint_examples), set(OPENAI_HTTP_ENDPOINTS))
         self.assertIn("input", report.openai_responses_request)
         self.assertIn("messages", report.openai_chat_request)
         self.assertIn("prompt", report.openai_completions_request)
@@ -319,6 +324,23 @@ class RetrievalApiBuilderTests(unittest.TestCase):
         self.assertEqual(report.vllm_realtime_request["type"], "session.update")
         self.assertIn("text_1", report.vllm_score_request)
         self.assertIn("contents", report.gemini_generate_content_request)
+
+    def test_openai_http_endpoint_examples_cover_exact_required_inventory(self) -> None:
+        examples = build_openai_http_endpoint_examples()
+
+        self.assertEqual(set(examples), set(OPENAI_HTTP_ENDPOINTS))
+        self.assertEqual(examples["POST /v1/responses"]["json"]["model"], "gpt-5-mini")
+        self.assertEqual(examples["POST /v1/realtime/client_secrets"]["json"]["session"]["model"], "gpt-realtime-mini")
+        self.assertEqual(examples["POST /v1/audio/transcriptions"]["multipart"]["file"], "sample.wav")
+        self.assertEqual(examples["POST /v1/videos"]["json"]["model"], "sora-2")
+        self.assertEqual(
+            examples["POST /v1/uploads/{upload_id}/complete"]["path_params"]["upload_id"],
+            "upload_123",
+        )
+        self.assertEqual(
+            examples["POST /v1/threads/{thread_id}/runs/{run_id}/submit_tool_outputs"]["json"]["tool_outputs"][0]["output"],
+            "verified",
+        )
 
     def test_endpoint_compatibility_report_fails_for_invalid_openai_responses_shape(self) -> None:
         report = build_endpoint_compatibility_report()

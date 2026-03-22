@@ -1,6 +1,6 @@
 # Tests
 
-This folder contains the verification surface for the `agent_data`, `agent_retrieval`, and `agent_memory` modules.
+This folder contains the verification surface for the `agent_data`, `agent_retrieval`, `agent_memory`, and `agent_query` modules.
 
 ## Files
 
@@ -100,6 +100,38 @@ Cross-module integration checks for:
   - agentic-loop queries
 - API payload compatibility across retrieval and memory tool surfaces
 - schema/runtime asset presence across all three modules
+
+### [`test_agent_query_api.py`](/mnt/c/Users/heman/Desktop/code/Agentic_frame_work/OpenAgentBench/tests/test_agent_query_api.py)
+
+API-surface checks for:
+
+- public runtime asset resolution for `agent_query`
+- exported query tool definitions
+- corrected module-local `skills.md` availability
+
+### [`test_agent_query_compat.py`](/mnt/c/Users/heman/Desktop/code/Agentic_frame_work/OpenAgentBench/tests/test_agent_query_compat.py)
+
+Compatibility-focused query checks for:
+
+- OpenAI Responses, Chat Completions, and Realtime tool-enabled request shapes
+- vLLM OpenAI-compatible request shapes
+- Gemini compatibility stubs for query analysis
+
+### [`test_agent_query_engine.py`](/mnt/c/Users/heman/Desktop/code/Agentic_frame_work/OpenAgentBench/tests/test_agent_query_engine.py)
+
+Execution checks for:
+
+- tool-aware and memory-aware decomposition
+- cache-backed idempotent query resolution
+- behavioral-signal and latent-goal inference for psychologically complex requests
+
+### [`test_agent_query_integration.py`](/mnt/c/Users/heman/Desktop/code/Agentic_frame_work/OpenAgentBench/tests/test_agent_query_integration.py)
+
+Cross-module query checks for:
+
+- integration with memory context assembly and tool affordances
+- model routing for high-complexity requests
+- additive SQL schema availability for query cache and audit storage
 
 ## Success Signals
 

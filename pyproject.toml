@@ -12,6 +12,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0.0"]
+openai = ["openai>=2.29.0"]
 postgres = ["psycopg[binary]>=3.2.0"]
 speed = ["orjson>=3.10.0"]
 

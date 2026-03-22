@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from openagentbench.agent_data import (
     OPENAI_ENDPOINTS,
+    OPENAI_HTTP_ENDPOINTS,
     VLLM_ENDPOINTS,
     ContextCompiler,
     CompileRequest,
@@ -192,6 +193,31 @@ def test_endpoint_catalogs_include_recent_openai_and_vllm_surfaces() -> None:
     assert "/v1/embeddings" in paths
     assert "/v1/videos" in paths
     assert "/v1/moderations" in paths
+    assert "/v1/files" in paths
+    assert "/v1/uploads" in paths
+    assert "/v1/vector_stores" in paths
+    assert "/v1/evals" in paths
+    assert "/v1/containers" in paths
+    assert "/v1/assistants" in paths
     assert "/v1/responses" in vllm_paths
     assert "/v1/realtime" in vllm_paths
     assert "/score" in vllm_paths
+
+
+def test_exact_openai_http_endpoint_inventory_includes_required_surface() -> None:
+    required = {
+        "POST /v1/responses",
+        "GET /v1/responses/{response_id}/input_items",
+        "POST /v1/realtime/client_secrets",
+        "POST /v1/audio/voices",
+        "POST /v1/videos/extensions",
+        "POST /v1/uploads/{upload_id}/parts",
+        "GET /v1/fine_tuning/checkpoints/{fine_tuned_model_checkpoint}/permissions",
+        "POST /v1/vector_stores/{vector_store_id}/search",
+        "GET /v1/evals/{eval_id}/runs/{run_id}",
+        "GET /v1/containers/{container_id}/files/{file_id}/content",
+        "POST /v1/threads/{thread_id}/runs/{run_id}/submit_tool_outputs",
+    }
+
+    assert required.issubset(set(OPENAI_HTTP_ENDPOINTS))
+    assert len(OPENAI_HTTP_ENDPOINTS) >= 100
