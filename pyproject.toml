@@ -25,3 +25,7 @@ include = ["agent_data*", "openagentbench*"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+addopts = "--capture=sys"
+markers = [
+    "postgres: marks tests that exercise PostgreSQL-backed integration paths",
+]
