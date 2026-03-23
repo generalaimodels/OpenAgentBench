@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
 
+from openagentbench.agent_context import ContextCompileRequest, compile_context
 from openagentbench.agent_data import HistoryRecord, MemoryRecord
 from openagentbench.agent_memory import MemoryCompileRequest, MemoryContextCompiler, WorkingMemoryItem
 from openagentbench.agent_retrieval import classify_query
@@ -94,19 +95,6 @@ class QueryContextAssembler:
             turn_count=request.session.turn_count,
         )
 
-        compiled_memory = self.memory_compiler.compile_context(
-            MemoryCompileRequest(
-                user_id=request.user_id,
-                session=request.session,
-                query_text=request.query_text,
-                total_budget=max(budget.context_budget - min(request.tool_token_budget, budget.routing_budget), 0),
-                tool_budget=min(request.tool_token_budget, budget.routing_budget),
-                classification=classification,
-            ),
-            memories=memories,
-            working_items=working_items,
-        )
-
         tool_definitions = tuple(tools) or tuple(self.tool_definition_factory())
         normalized_tools = tuple(_normalize_tool(tool, policy=self.config.tool_policy) for tool in tool_definitions)
         selected_tools = rank_tool_affordances(
@@ -116,14 +104,38 @@ class QueryContextAssembler:
             policy=self.config.tool_policy,
         )
 
+        compiled_context = compile_context(
+            ContextCompileRequest(
+                user_id=request.user_id,
+                session=request.session,
+                query_text=request.query_text,
+                history=tuple(history),
+                memories=tuple(memories),
+                working_items=tuple(working_items),
+                active_tools=tool_definitions,
+                provider="openai_responses",
+                total_budget=context_window,
+                response_reserve=request.session.max_response_tokens,
+                tool_budget=min(request.tool_token_budget, budget.routing_budget + budget.decomposition_budget),
+                memory_budget=max(budget.context_budget - min(request.tool_token_budget, budget.routing_budget), 0),
+                metadata={
+                    "objective": request.query_text,
+                    "intent": classification.type.value,
+                    "subqueries": request.max_subqueries,
+                },
+            ),
+            classification=classification,
+        )
+
         history_excerpt = summarize_history(_history_line(record) for record in history)
         history_tokens = sum(count_tokens(line) for line in history_excerpt)
         tool_tokens = sum(tool.token_cost_estimate for tool in selected_tools)
         token_accounting = {
             "query": count_tokens(request.query_text),
             "history": history_tokens,
-            "memory": compiled_memory.total_tokens,
+            "memory": compiled_context.memory_projection.total_tokens,
             "tools": tool_tokens,
+            "context": compiled_context.total_tokens,
         }
         consumed = sum(token_accounting.values())
         remaining = max(budget.total_budget - consumed, 0)
@@ -132,8 +144,13 @@ class QueryContextAssembler:
         provenance = (
             ContextSourceRecord(source="query", token_count=token_accounting["query"], detail="raw_query"),
             ContextSourceRecord(source="history", token_count=history_tokens, detail=f"turns={len(history_excerpt)}"),
-            ContextSourceRecord(source="memory", token_count=compiled_memory.total_tokens, detail=f"messages={len(compiled_memory.messages)}"),
+            ContextSourceRecord(
+                source="memory",
+                token_count=compiled_context.memory_projection.total_tokens,
+                detail=f"messages={len(compiled_context.memory_projection.messages)}",
+            ),
             ContextSourceRecord(source="tools", token_count=tool_tokens, detail=f"selected={len(selected_tools)}"),
+            ContextSourceRecord(source="context", token_count=compiled_context.total_tokens, detail=compiled_context.provider_profile.provider),
         )
 
         return (
@@ -141,11 +158,15 @@ class QueryContextAssembler:
                 query_text=request.query_text,
                 session_topic=session_topic,
                 history_excerpt=history_excerpt,
-                memory_messages=tuple(compiled_memory.messages),
+                memory_messages=compiled_context.memory_projection.messages,
                 tool_affordances=selected_tools,
                 token_accounting=token_accounting,
                 provenance=provenance,
                 remaining_budget=remaining,
+                compiled_context=compiled_context,
+                invariant_report=compiled_context.invariant_report,
+                compilation_trace=compiled_context.trace,
+                archive_entry=compiled_context.archive_entry,
             ),
             budget,
         )

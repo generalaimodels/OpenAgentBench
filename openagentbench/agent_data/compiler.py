@@ -69,33 +69,49 @@ class ContextCompiler:
             weights=self.retrieval_weights,
         )
         memory_selection = pack_memories(scored_memories, memory_budget)
-
-        messages: list[dict[str, object]] = []
         system_prompt = (
             request.system_prompt_text
             or request.session.system_prompt_text
             or request.session.metadata.get("system_prompt_text")
         )
-        if isinstance(system_prompt, str) and system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
+        from openagentbench.agent_context.compiler import compile_context
+        from openagentbench.agent_context.models import ContextCompileRequest
 
-        if memory_selection.records:
-            messages.append(
-                {
-                    "role": "system",
-                    "content": format_memory_block(memory_selection.records),
-                }
+        canonical = compile_context(
+            ContextCompileRequest(
+                user_id=request.user_id,
+                session=request.session,
+                query_text=request.query_text,
+                history=tuple(history),
+                memories=tuple(memories),
+                provider="openai_chat",
+                total_budget=request.session.context_window_size,
+                response_reserve=request.session.max_response_tokens,
+                tool_budget=request.tool_token_budget,
+                history_budget=budget.history_budget,
+                memory_budget=budget.memory_budget,
+                system_prompt_text=system_prompt if isinstance(system_prompt, str) else None,
+                metadata={
+                    **dict(request.metadata),
+                    "task_type": task_type.value,
+                },
             )
-
-        if history_selection.truncated and request.session.summary_text:
-            messages.append(
-                {
-                    "role": "system",
-                    "content": f"[Session Summary]\n{request.session.summary_text}",
-                }
-            )
-
-        messages.extend(record.to_chat_message().as_openai_dict() for record in history_selection.records)
+        )
+        messages = list(canonical.messages)
+        if memory_selection.records and not any(
+            isinstance(message.get("content"), str) and "[Memory Context]" in message["content"]
+            for message in messages
+        ):
+            insert_at = 1 if messages and messages[0].get("role") == "system" else 0
+            messages.insert(insert_at, {"role": "system", "content": format_memory_block(memory_selection.records)})
+        if history_selection.truncated and request.session.summary_text and not any(
+            isinstance(message.get("content"), str) and "[Session Summary]" in message["content"]
+            for message in messages
+        ):
+            insert_at = 1 if messages and messages[0].get("role") == "system" else 0
+            if memory_selection.records:
+                insert_at += 1
+            messages.insert(insert_at, {"role": "system", "content": f"[Session Summary]\n{request.session.summary_text}"})
 
         tokens_used = history_selection.token_count + memory_selection.token_count + request.session.system_prompt_tokens
         return CompiledContext(

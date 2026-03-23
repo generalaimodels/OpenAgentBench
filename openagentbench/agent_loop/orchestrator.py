@@ -9,6 +9,7 @@ from typing import Any, Sequence
 from uuid import UUID, uuid4
 
 from openagentbench.agent_data import HistoryRecord, MemoryRecord, MemoryScope, MemoryTier, SessionRecord
+from openagentbench.agent_context import ContextCompileRequest, InMemoryContextRepository, compile_context
 from openagentbench.agent_query import QueryResolutionRequest, QueryResolver, RouteTarget
 from openagentbench.agent_retrieval import (
     AuthorityTier,
@@ -190,6 +191,7 @@ class AgentLoopEngine:
     policy: LoopPolicy = field(default_factory=LoopPolicy)
     query_resolver: QueryResolver = field(default_factory=QueryResolver)
     repository: LoopRepository = field(default_factory=InMemoryLoopRepository)
+    context_repository: InMemoryContextRepository = field(default_factory=InMemoryContextRepository)
 
     def execute(
         self,
@@ -230,6 +232,9 @@ class AgentLoopEngine:
         memories: list[MemoryRecord],
         working_items: Sequence[WorkingMemoryItem],
     ) -> LoopExecutionResult:
+        state.history_records = tuple(history)
+        state.memory_records = tuple(memories)
+        state.working_items = tuple(working_items)
         tool_engine = self._build_tool_engine(state.request, history, memories, working_items)
         retrieval_engine = self._build_retrieval_engine(state.request.session, history, memories, state.request.scopes)
 
@@ -300,6 +305,10 @@ class AgentLoopEngine:
             tools=self._query_tool_definitions(),
         )
         state.query_response = query_response
+        state.compiled_context = query_response.plan.context.compiled_context
+        state.context_invariants = query_response.plan.context.invariant_report
+        state.context_trace = query_response.plan.context.compilation_trace
+        state.context_archive = [query_response.plan.context.archive_entry] if query_response.plan.context.archive_entry is not None else []
         state.subsystem_status = {
             "agent_query": SubsystemAvailability.READY,
             "agent_memory": SubsystemAvailability.READY if memories or working_items else SubsystemAvailability.DEGRADED,
@@ -308,6 +317,7 @@ class AgentLoopEngine:
         }
         state.cognitive_mode = self._select_cognitive_mode(state)
         state.total_tokens_consumed += sum(query_response.plan.context.token_accounting.values())
+        self._refresh_context_artifact(state)
         state.last_completed_phase = LoopPhase.CONTEXT_ASSEMBLE
         state.current_phase = LoopPhase.PLAN
 
@@ -371,6 +381,7 @@ class AgentLoopEngine:
             state.escalation_reason = EscalationReason.PLAN_INFEASIBLE
             state.current_phase = LoopPhase.ESCALATE
         else:
+            self._refresh_context_artifact(state)
             state.last_completed_phase = LoopPhase.PLAN
             state.current_phase = LoopPhase.RETRIEVE if state.cognitive_mode is CognitiveMode.SYSTEM1_FAST else LoopPhase.DECOMPOSE
 
@@ -492,6 +503,7 @@ class AgentLoopEngine:
             trace_ids=tuple(trace_ids),
         )
         state.total_tokens_consumed += running_tokens
+        self._refresh_context_artifact(state)
         state.last_completed_phase = LoopPhase.RETRIEVE
         state.current_phase = LoopPhase.ACT
 
@@ -538,6 +550,7 @@ class AgentLoopEngine:
         state.action_outcomes = outcomes
         state.output_text = self._compose_output_text(state)
         self._capture_deferred_writes(state)
+        self._refresh_context_artifact(state)
         state.last_completed_phase = LoopPhase.ACT
         state.current_phase = LoopPhase.METACOGNITIVE_CHECK
 
@@ -689,6 +702,7 @@ class AgentLoopEngine:
             tool_success_rate=tool_success_rate,
             schema_valid=schema_valid,
         )
+        self._refresh_context_artifact(state)
         state.last_completed_phase = LoopPhase.VERIFY
         if passed:
             state.current_phase = LoopPhase.COMMIT
@@ -850,6 +864,7 @@ class AgentLoopEngine:
             )
             existing_hashes.add(content_hash)
         state.committed_writes = committed
+        self._refresh_context_artifact(state)
         state.last_completed_phase = LoopPhase.COMMIT
         state.current_phase = LoopPhase.HALT
 
@@ -1226,6 +1241,71 @@ class AgentLoopEngine:
             )
         return items
 
+    def _tool_result_turns(self, state: LoopExecutionState) -> tuple[dict[str, Any], ...]:
+        turns: list[dict[str, Any]] = []
+        for outcome in state.action_outcomes:
+            if outcome.tool_id is None:
+                continue
+            turns.append(
+                {
+                    "call_id": f"{state.request.loop_id}:{outcome.action_id}:{outcome.tool_id}",
+                    "tool_id": outcome.tool_id,
+                    "output": dict(outcome.output),
+                }
+            )
+        return tuple(turns)
+
+    def _refresh_context_artifact(self, state: LoopExecutionState) -> None:
+        active_tools = self._query_tool_definitions()
+        compiled = compile_context(
+            ContextCompileRequest(
+                user_id=state.request.user_id,
+                session=state.request.session,
+                query_text=state.request.query_text,
+                history=state.history_records,
+                memories=state.memory_records,
+                working_items=state.working_items,
+                evidence_items=tuple(state.evidence.items) if state.evidence is not None else (),
+                tool_result_turns=self._tool_result_turns(state),
+                active_tools=active_tools,
+                provider="openai_responses",
+                cycle_number=state.iteration,
+                current_phase=state.current_phase.value,
+                current_step=state.plan.actions[0].action_id if state.plan and state.plan.actions else None,
+                total_budget=min(self.policy.total_token_budget, state.request.session.context_window_size),
+                response_reserve=state.request.session.max_response_tokens,
+                tool_budget=max(
+                    sum(count_tokens(tool["function"]["description"]) for tool in active_tools if "function" in tool),
+                    256,
+                ),
+                completed_action_ids=tuple(outcome.action_id for outcome in state.action_outcomes if outcome.status is ActionStatus.SUCCESS),
+                pending_action_ids=tuple(outcome.action_id for outcome in state.action_outcomes if outcome.status is not ActionStatus.SUCCESS),
+                prior_compiled_context=state.compiled_context,
+                metadata={
+                    "objective": state.request.query_text,
+                    "loop_id": str(state.request.loop_id),
+                    "mode": state.cognitive_mode.value if state.cognitive_mode is not None else "unknown",
+                    "complexity": (
+                        state.query_response.plan.cognitive.complexity_score
+                        if state.query_response is not None
+                        else 0.0
+                    ),
+                    "intent": (
+                        state.query_response.plan.intent.intent_class.value
+                        if state.query_response is not None
+                        else "unknown"
+                    ),
+                    "subqueries": len(state.query_response.plan.subqueries) if state.query_response is not None else 0,
+                },
+            )
+        )
+        self.context_repository.put_archive_entry(compiled.archive_entry)
+        state.compiled_context = compiled
+        state.context_invariants = compiled.invariant_report
+        state.context_trace = compiled.trace
+        if not state.context_archive or state.context_archive[-1].archive_hash != compiled.archive_entry.archive_hash:
+            state.context_archive.append(compiled.archive_entry)
+
     def _execution_context(self, request: LoopExecutionRequest) -> ExecutionContext:
         return ExecutionContext(
             user_id=request.user_id,
@@ -1261,6 +1341,10 @@ class AgentLoopEngine:
             paused=paused,
             upgraded_from_fast_path=state.upgraded_from_fast_path,
             query_response=state.query_response,
+            compiled_context=state.compiled_context,
+            context_invariants=state.context_invariants,
+            context_trace=state.context_trace,
+            context_archive=tuple(state.context_archive),
             plan=state.plan,
             predicted_resources=state.predicted_resources,
             evidence=state.evidence,

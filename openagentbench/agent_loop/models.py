@@ -8,9 +8,16 @@ from time import perf_counter_ns
 from typing import Any, Mapping
 from uuid import UUID, uuid4
 
-from openagentbench.agent_data import MemoryScope, MemoryTier, SessionRecord
+from openagentbench.agent_context import (
+    CompiledCycleContext,
+    CompilationTrace,
+    ContextArchiveEntry,
+    ContextInvariantReport,
+)
+from openagentbench.agent_data import HistoryRecord, MemoryRecord, MemoryScope, MemoryTier, SessionRecord
 from openagentbench.agent_query import QueryResolutionResponse, RouteTarget
 from openagentbench.agent_retrieval import AuthorityTier, MemoryType, SourceTable
+from openagentbench.agent_memory import WorkingMemoryItem
 
 from .enums import (
     ActionStatus,
@@ -270,11 +277,18 @@ class LoopPhaseSpan:
 @dataclass(slots=True)
 class LoopExecutionState:
     request: LoopExecutionRequest
+    history_records: tuple[HistoryRecord, ...] = ()
+    memory_records: tuple[MemoryRecord, ...] = ()
+    working_items: tuple[WorkingMemoryItem, ...] = ()
     current_phase: LoopPhase = LoopPhase.CONTEXT_ASSEMBLE
     last_completed_phase: LoopPhase | None = None
     cognitive_mode: CognitiveMode | None = None
     subsystem_status: dict[str, SubsystemAvailability] = field(default_factory=dict)
     query_response: QueryResolutionResponse | None = None
+    compiled_context: CompiledCycleContext | None = None
+    context_invariants: ContextInvariantReport | None = None
+    context_trace: CompilationTrace | None = None
+    context_archive: list[ContextArchiveEntry] = field(default_factory=list)
     plan: LoopPlan | None = None
     predicted_resources: PredictedResources | None = None
     evidence: EvidenceBundle | None = None
@@ -341,6 +355,10 @@ class LoopExecutionResult:
     paused: bool
     upgraded_from_fast_path: bool
     query_response: QueryResolutionResponse | None
+    compiled_context: CompiledCycleContext | None
+    context_invariants: ContextInvariantReport | None
+    context_trace: CompilationTrace | None
+    context_archive: tuple[ContextArchiveEntry, ...]
     plan: LoopPlan | None
     predicted_resources: PredictedResources | None
     evidence: EvidenceBundle | None

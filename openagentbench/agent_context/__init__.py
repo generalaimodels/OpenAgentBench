@@ -1,0 +1,70 @@
+"""Public surface for the OpenAgentBench agent-context module."""
+
+from .compiler import (
+    build_provider_profile,
+    compile_context,
+    compile_policy_kernel,
+    project_memory,
+    project_retrieval_evidence,
+    project_task_state,
+    run_cycle_filter,
+)
+from .endpoint_compat import (
+    assert_agent_context_payload_compatibility,
+    build_agent_context_compatibility_report,
+)
+from .models import (
+    CompiledCycleContext,
+    CompilationTrace,
+    ContextArchiveEntry,
+    ContextCompatibilityReport,
+    ContextCompileRequest,
+    ContextInvariantReport,
+    ContextProviderName,
+    ContextProviderProfile,
+    ContextSection,
+    CycleFilterResult,
+    EvidenceProjection,
+    EvidenceProjectionItem,
+    MemoryProjection,
+    MemoryProjectionItem,
+    PolicyKernel,
+    TaskStateProjection,
+    new_context_archive_entry,
+)
+from .repository import ContextRepository, InMemoryContextRepository
+from .runtime import module_root, plan_path, read_plan
+
+__all__ = [
+    "CompiledCycleContext",
+    "CompilationTrace",
+    "ContextArchiveEntry",
+    "ContextCompatibilityReport",
+    "ContextCompileRequest",
+    "ContextInvariantReport",
+    "ContextProviderName",
+    "ContextProviderProfile",
+    "ContextRepository",
+    "ContextSection",
+    "CycleFilterResult",
+    "EvidenceProjection",
+    "EvidenceProjectionItem",
+    "InMemoryContextRepository",
+    "MemoryProjection",
+    "MemoryProjectionItem",
+    "PolicyKernel",
+    "TaskStateProjection",
+    "assert_agent_context_payload_compatibility",
+    "build_agent_context_compatibility_report",
+    "build_provider_profile",
+    "compile_context",
+    "compile_policy_kernel",
+    "module_root",
+    "new_context_archive_entry",
+    "plan_path",
+    "project_memory",
+    "project_retrieval_evidence",
+    "project_task_state",
+    "read_plan",
+    "run_cycle_filter",
+]

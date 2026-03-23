@@ -7,6 +7,12 @@ from datetime import datetime, timezone
 from typing import Any, Mapping
 from uuid import UUID, uuid4
 
+from openagentbench.agent_context.models import (
+    CompiledCycleContext,
+    CompilationTrace,
+    ContextArchiveEntry,
+    ContextInvariantReport,
+)
 from openagentbench.agent_data import SessionRecord
 from openagentbench.agent_retrieval import (
     ProtocolType,
@@ -94,6 +100,10 @@ class QueryContextArtifact:
     token_accounting: Mapping[str, int]
     provenance: tuple[ContextSourceRecord, ...]
     remaining_budget: int
+    compiled_context: CompiledCycleContext | None = None
+    invariant_report: ContextInvariantReport | None = None
+    compilation_trace: CompilationTrace | None = None
+    archive_entry: ContextArchiveEntry | None = None
 
 
 @dataclass(slots=True, frozen=True)

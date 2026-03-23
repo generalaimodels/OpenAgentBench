@@ -1,1 +1,1 @@
-"""Realtime Q&A example application for OpenAgentBench."""
+"""Legacy realtime Q&A app compatibility package."""
